@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>skpack to mrpack converter</title>
+<style>
+:root{--bg:#280A02;--panel:#3B1008;--ink:#FBEBD0;--mute:#D9B596;--line:#5F150A;--acc:#F8AC1E;--ok:#6FD3A0;--warn:#F8AC1E;--bad:#FF8A78;color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.55 "Inter","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;min-height:100vh;padding:max(24px,env(safe-area-inset-top)) 16px 48px}
+main{max-width:860px;margin:0 auto}
+h1{font:700 clamp(28px,5vw,44px)/1.12 "Inter","Segoe UI",system-ui,-apple-system,Roboto,Helvetica,Arial,sans-serif;color:#FBEBD0;margin:24px 0 10px;letter-spacing:-.025em}
+.lead{color:#E0C3A6;max-width:60ch;margin:0 0 28px}
+.drop{display:block;border:2px dashed #BA400A;border-radius:16px;padding:44px 20px;text-align:center;color:#FBEBD0;cursor:pointer;transition:.15s}
+.drop:hover,.drop.over,.drop:focus-within{border-color:#F8AC1E;background:#3B1008}
+.drop b{display:block;font-size:20px;font-weight:600;color:#FFF6E6;margin-bottom:4px}
+.drop input{position:absolute;opacity:0;pointer-events:none}
+.card{background:var(--panel);border-radius:16px;padding:22px;margin-top:20px}
+.head{display:flex;gap:16px;align-items:center}
+.head img{width:72px;height:72px;border-radius:14px;background:#5F150A;object-fit:cover}
+.head h2{margin:0;font-size:24px;font-weight:700;letter-spacing:-.015em}
+.meta{color:var(--mute);font-size:14px}
+.stats{display:flex;flex-wrap:wrap;gap:8px;margin-top:14px}
+.chip{display:inline-block;padding:2px 10px;border-radius:99px;font-size:13px;font-weight:700;background:#5F150A;color:#FBEBD0}
+.chip.ok{background:#17402c;color:#B8EBD1}.chip.warn{background:#6B3A06;color:#FFD27A}.chip.bad{background:#7A1A12;color:#FFC9C0}
+h3{margin:22px 0 8px;font-size:17px}
+label.opt{display:flex;gap:10px;align-items:flex-start;padding:6px 0;cursor:pointer}
+label.opt small{display:block;color:var(--mute)}
+input[type=checkbox]{margin-top:5px;accent-color:var(--acc);width:16px;height:16px}
+.files{max-height:300px;overflow:auto;border:1px solid var(--line);border-radius:10px;background:#2F0C04}
+.row{display:flex;gap:10px;justify-content:space-between;align-items:center;padding:7px 12px;border-bottom:1px solid var(--line);font-size:14px}
+.row:last-child{border:0}.row span:first-child{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+button,.btn{font-weight:700;font-size:16px;font-family:inherit;text-decoration:none;display:inline-block;border:0;border-radius:12px;padding:12px 22px;background:var(--acc);color:#280A02;cursor:pointer}
+button:disabled{opacity:.5;cursor:default}
+button.sec{background:#5F150A;color:#FBEBD0}
+button:focus-visible,a:focus-visible{outline:3px solid #F8AC1E;outline-offset:2px}
+.actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:20px;align-items:center}
+.log{margin:14px 0 0;padding:0;list-style:none;font-size:14px}
+.log li{padding:2px 0}.log .w{color:var(--warn)}.log .e{color:var(--bad)}.log .g{color:var(--ok)}
+.note{color:var(--mute);font-size:13px;margin-top:10px}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<main>
+<h1>Turn an skpack into a Modrinth modpack</h1>
+<p class="lead">Drop an SKLauncher .skpack file. Everything is converted in your browser into a .mrpack that Modrinth App, Prism and other launchers can import. Nothing is uploaded.</p>
+
+<label class="drop" id="drop"><b>Drop your .skpack here</b>or click to choose a file<input type="file" id="pick" accept=".skpack,.zip"></label>
+
+<section id="result" hidden>
+  <div class="card">
+    <div class="head"><img id="icon" alt=""><div><h2 id="name"></h2><div class="meta" id="meta"></div></div></div>
+    <div class="stats" id="stats"></div>
+
+    <h3>Files</h3>
+    <div class="files" id="files"></div>
+
+    <h3>Options</h3>
+    <label class="opt"><input type="checkbox" id="oApi" checked><span>Look up files on Modrinth<small>Finds Modrinth downloads for CurseForge files by hash and sets client/server support. Needs internet; only hashes are sent.</small></span></label>
+    <label class="opt"><input type="checkbox" id="oClean" checked><span>Remove junk from overrides<small>Drops crash logs, download logs and world-specific JEI history.</small></span></label>
+
+    <div id="userdata" hidden><h3>Worlds and screenshots</h3><div id="udList"></div></div>
+
+    <div id="missing" hidden>
+      <h3>Files Modrinth can't host</h3>
+      <p class="note" style="margin-top:0">These files have no Modrinth download. Add the original files below and they will be bundled inside the pack, matched by SHA-1.</p>
+      <div class="files" id="missList"></div>
+      <div class="actions"><label class="btn sec" style="cursor:pointer">Add files<input type="file" id="extra" multiple hidden></label></div>
+    </div>
+
+    <div class="actions">
+      <button id="go">Convert to .mrpack</button>
+      <a id="dl" class="btn" hidden>Download</a>
+      <a id="dlIcon" class="btn sec" hidden>Save icon</a>
+    </div>
+    <ul class="log" id="log"></ul>
+    <p class="note">Worlds are copied into the instance's saves folder on import. The .mrpack format has no icon field. Upload the icon separately if you publish on Modrinth.</p>
+  </div>
+</section>
+</main>
+
+<script>
+"use strict";
+const $=id=>document.getElementById(id);
+const enc=new TextEncoder(),dec=new TextDecoder();
+const API="https://api.modrinth.com/v2";
+
+/* ---------- minimal zip reader / writer (native deflate-raw streams) ---------- */
+async function inflate(u8){const s=new Blob([u8]).stream().pipeThrough(new DecompressionStream("deflate-raw"));return new Uint8Array(await new Response(s).arrayBuffer())}
+async function deflate(u8){const s=new Blob([u8]).stream().pipeThrough(new CompressionStream("deflate-raw"));return new Uint8Array(await new Response(s).arrayBuffer())}
+async function readZip(buf){
+  const u=new Uint8Array(buf),v=new DataView(buf);let e=u.length-22;
+  while(e>=0&&v.getUint32(e,true)!==0x06054b50)e--;
+  if(e<0)throw new Error("Not a valid zip archive");
+  const n=v.getUint16(e+10,true);let p=v.getUint32(e+16,true);const out=new Map();
+  for(let i=0;i<n;i++){
+    const m=v.getUint16(p+10,true),csz=v.getUint32(p+20,true),nl=v.getUint16(p+28,true),xl=v.getUint16(p+30,true),cl=v.getUint16(p+32,true),off=v.getUint32(p+42,true);
+    const name=dec.decode(u.subarray(p+46,p+46+nl));p+=46+nl+xl+cl;
+    if(name.endsWith("/"))continue;
+    const lo=off+30+v.getUint16(off+26,true)+v.getUint16(off+28,true),raw=u.subarray(lo,lo+csz);
+    out.set(name,{get:()=>m===0?Promise.resolve(raw):m===8?inflate(raw):Promise.reject(new Error("Unsupported compression in "+name))});
+  }
+  return out;
+}
+const CRC=(()=>{const t=new Uint32Array(256);for(let n=0;n<256;n++){let c=n;for(let k=0;k<8;k++)c=c&1?0xedb88320^(c>>>1):c>>>1;t[n]=c>>>0}return t})();
+const crc32=u=>{let c=~0;for(let i=0;i<u.length;i++)c=CRC[(c^u[i])&255]^(c>>>8);return~c>>>0};
+async function writeZip(entries){
+  const parts=[],cd=[];let off=0;
+  for(const [name,data] of entries){
+    const nb=enc.encode(name),skip=/\.(jar|zip|png|webp|ogg)$/i.test(name);
+    const c=skip||data.length<64?data:await deflate(data),meth=c===data?0:8,crc=crc32(data);
+    const h=new DataView(new ArrayBuffer(30));
+    h.setUint32(0,0x04034b50,true);h.setUint16(4,20,true);h.setUint16(6,0x0800,true);h.setUint16(8,meth,true);h.setUint16(12,0x21,true);
+    h.setUint32(14,crc,true);h.setUint32(18,c.length,true);h.setUint32(22,data.length,true);h.setUint16(26,nb.length,true);
+    parts.push(new Uint8Array(h.buffer),nb,c);
+    const d=new DataView(new ArrayBuffer(46));
+    d.setUint32(0,0x02014b50,true);d.setUint16(4,20,true);d.setUint16(6,20,true);d.setUint16(8,0x0800,true);d.setUint16(10,meth,true);d.setUint16(14,0x21,true);
+    d.setUint32(16,crc,true);d.setUint32(20,c.length,true);d.setUint32(24,data.length,true);d.setUint16(28,nb.length,true);d.setUint32(42,off,true);
+    cd.push(new Uint8Array(d.buffer),nb);off+=30+nb.length+c.length;
+  }
+  const size=cd.reduce((a,b)=>a+b.length,0),end=new DataView(new ArrayBuffer(22));
+  end.setUint32(0,0x06054b50,true);end.setUint16(8,entries.length,true);end.setUint16(10,entries.length,true);end.setUint32(12,size,true);end.setUint32(16,off,true);
+  return new Blob([...parts,...cd,new Uint8Array(end.buffer)],{type:"application/zip"});
+}
+const hex=b=>[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,"0")).join("");
+const digest=async(alg,u8)=>hex(await crypto.subtle.digest(alg,u8));
+
+/* ---------- state ---------- */
+let zip,pack,iconBlobUrl,extras=new Map(),resolved=null,worlds=new Map(),shots=0;
+const LOADERS={fabric:"fabric-loader",quilt:"quilt-loader",forge:"forge",neoforge:"neoforge"};
+const log=(t,c="")=>{const li=document.createElement("li");li.className=c;li.textContent=t;$("log").append(li)};
+const fmt=n=>n>1e6?(n/1e6).toFixed(1)+" MB":Math.max(1,Math.round(n/1e3))+" KB";
+
+/* ---------- load ---------- */
+async function load(file){
+  $("log").textContent="";$("dl").hidden=$("dlIcon").hidden=true;extras.clear();resolved=null;
+  try{
+    zip=await readZip(await file.arrayBuffer());
+    if(!zip.has("skpack.json"))throw new Error("skpack.json not found. This doesn't look like an skpack.");
+    pack=JSON.parse(dec.decode(await zip.get("skpack.json").get()));
+    if(!Array.isArray(pack.files)||!pack.minecraft)throw new Error("skpack.json is missing files or minecraft info.");
+  }catch(e){alert("Can't read this file: "+e.message);return}
+  const m=pack.minecraft;
+  $("name").textContent=pack.name||"Untitled pack";
+  $("meta").textContent=`Minecraft ${m.minecraftVersion} · ${m.gameType} ${m.loaderVersion||""} · v${pack.version||"1.0.0"}`;
+  if(iconBlobUrl)URL.revokeObjectURL(iconBlobUrl);
+  const ic=pack.icon&&pack.icon.value&&zip.get(pack.icon.value);
+  if(ic){iconBlobUrl=URL.createObjectURL(new Blob([await ic.get()]));$("icon").src=iconBlobUrl;$("icon").hidden=false}else $("icon").hidden=true;
+  worlds=new Map();shots=0;
+  for(const k of zip.keys()){const w=k.match(/^overrides\/saves\/([^/]+)\//);
+    if(w)worlds.set(w[1],(worlds.get(w[1])||0)+1);else if(k.startsWith("overrides/screenshots/"))shots++}
+  const ud=$("udList");ud.textContent="";
+  const addRow=(key,title,sub)=>{const l=document.createElement("label");l.className="opt";
+    l.innerHTML='<input type="checkbox" checked><span></span>';l.firstChild.dataset.key=key;
+    l.lastChild.textContent=title;const sm=document.createElement("small");sm.textContent=sub;l.lastChild.append(sm);ud.append(l)};
+  for(const [n,c] of worlds)addRow("saves/"+n,"World: "+n,c+" files");
+  if(shots)addRow("screenshots",`Screenshots (${shots})`,"Images from the screenshots folder");
+  $("userdata").hidden=!(worlds.size||shots);
+  render();$("result").hidden=false;$("result").scrollIntoView({behavior:"smooth"});
+}
+const needsLookup=f=>!(f.downloads&&f.downloads.length);
+function status(f){
+  if(!needsLookup(f))return["Modrinth","ok"];
+  const r=resolved&&resolved.get(f.hashes.sha1);
+  if(r)return["Found on Modrinth","ok"];
+  if(extras.has(f.hashes.sha1))return["Bundled","ok"];
+  return[resolved?"Not on Modrinth":"Needs lookup","warn"];
+}
+function render(){
+  const fs=pack.files,ov=[...zip.keys()].filter(k=>k.startsWith("overrides/")&&!/^overrides\/(saves|screenshots)\//.test(k)).length;
+  const bad=fs.filter(f=>status(f)[1]==="warn");
+  $("stats").innerHTML=`<span class="chip">${fs.filter(f=>f.contentType==="mod").length} mods</span><span class="chip">${fs.filter(f=>f.contentType==="shader").length} shaders</span><span class="chip">${ov} config files</span>`+(worlds.size?`<span class="chip">${worlds.size} worlds</span>`:"")+(shots?`<span class="chip">${shots} screenshots</span>`:"")+(bad.length?`<span class="chip warn">${bad.length} need attention</span>`:`<span class="chip ok">all files covered</span>`);
+  $("files").innerHTML="";
+  for(const f of fs){const [t,c]=status(f),r=document.createElement("div");r.className="row";
+    r.innerHTML=`<span></span><span class="chip ${c}">${t}</span>`;r.firstChild.textContent=f.path.split("/").pop();$("files").append(r)}
+  const miss=bad.length?bad:[];$("missing").hidden=!(resolved&&miss.length);
+  $("missList").innerHTML="";
+  for(const f of miss){const r=document.createElement("div");r.className="row";r.innerHTML="<span></span><span class='meta'></span>";r.firstChild.textContent=f.path.split("/").pop();r.lastChild.textContent=fmt(f.size||0);$("missList").append(r)}
+}
+
+/* ---------- Modrinth lookup ---------- */
+async function lookup(){
+  const sha1s=pack.files.map(f=>f.hashes&&f.hashes.sha1).filter(Boolean);
+  const r=await fetch(API+"/version_files",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({hashes:sha1s,algorithm:"sha1"})});
+  if(!r.ok)throw new Error("Modrinth returned "+r.status);
+  const byHash=await r.json(),map=new Map(),pids=new Set(pack.files.map(f=>f.source==="modrinth"?f.projectId:null).filter(Boolean));
+  for(const [h,v] of Object.entries(byHash)){const file=v.files.find(x=>x.hashes.sha1===h);if(file){map.set(h,{url:file.url,project:v.project_id,file});pids.add(v.project_id)}}
+  const pr=await fetch(`${API}/projects?ids=${encodeURIComponent(JSON.stringify([...pids]))}`);
+  const env=new Map();if(pr.ok)for(const p of await pr.json())env.set(p.id,{client:p.client_side,server:p.server_side});
+  return{map,env};
+}
+
+/* ---------- convert ---------- */
+async function convert(){
+  $("go").disabled=true;$("log").textContent="";$("dl").hidden=true;
+  try{
+    let env=new Map();
+    if($("oApi").checked){
+      log("Looking up files on Modrinth…");
+      try{const r=await lookup();resolved=r.map;env=r.env;log(`Matched ${resolved.size} files by hash`,"g")}
+      catch(e){log("Modrinth lookup failed ("+e.message+"). Using defaults.","w");resolved=new Map()}
+    }else resolved=new Map();
+    render();
+    const files=[],entries=[],skipped=[];
+    for(const f of pack.files){
+      let dl=f.downloads,pid=f.source==="modrinth"?f.projectId:null,hashes=f.hashes,size=f.size;
+      if(needsLookup(f)){const r=resolved.get(f.hashes.sha1);if(r){dl=[r.url];pid=r.project;size=r.file.size}else dl=null}
+      let path=f.path.replace(/\\/g,"/");
+      if(path.startsWith("/")||path.split("/").includes(".."))throw new Error("Unsafe path in pack: "+path);
+      if(f.enabled===false)path+=".disabled";
+      if(dl){
+        const e=env.get(pid)||{},shader=f.contentType==="shader";
+        files.push({path,hashes:{sha1:hashes.sha1,sha512:hashes.sha512},env:{client:e.client||"required",server:shader?"unsupported":(e.server||"required")},downloads:dl,fileSize:size});
+      }else if(extras.has(f.hashes.sha1))entries.push(["overrides/"+path,extras.get(f.hashes.sha1)]);
+      else skipped.push(f.path);
+    }
+    const off=new Set([...document.querySelectorAll("#udList input:not(:checked)")].map(i=>i.dataset.key));
+    const clean=$("oClean").checked,junk=/^overrides\/(debug|downloads|crash-reports|logs)\/|^overrides\/config\/jei\/world\//;let removed=0;
+    for(const [n,e] of zip){
+      if(!n.startsWith("overrides/"))continue;
+      if(clean&&junk.test(n)){removed++;continue}
+      const ud=n.match(/^overrides\/(saves\/[^/]+|screenshots)\//);
+      if(ud&&off.has(ud[1]))continue;
+      entries.push([n,await e.get()]);
+    }
+    const m=pack.minecraft,deps={minecraft:m.minecraftVersion};
+    deps[LOADERS[m.gameType]||m.gameType]=m.loaderVersion;
+    const index={formatVersion:1,game:"minecraft",versionId:pack.version||"1.0.0",name:pack.name||"Converted pack",summary:`Converted from skpack (SKLauncher ${pack.launcherVersion||"?"})`,files,dependencies:deps};
+    entries.unshift(["modrinth.index.json",enc.encode(JSON.stringify(index,null,2))]);
+    const blob=await writeZip(entries),fname=(pack.name||"pack").replace(/[^\w.-]+/g,"_")+"-"+(pack.version||"1.0.0")+".mrpack";
+    $("dl").href=URL.createObjectURL(blob);$("dl").download=fname;$("dl").textContent="Download "+fname;$("dl").hidden=false;
+    if(iconBlobUrl){$("dlIcon").href=iconBlobUrl;$("dlIcon").download="icon.webp";$("dlIcon").hidden=false}
+    const wIn=[...worlds.keys()].filter(w=>!off.has("saves/"+w)).length;
+    if(wIn)log(`${wIn} world${wIn>1?"s":""} included`,"g");
+    if(shots&&!off.has("screenshots"))log(`${shots} screenshots included`,"g");
+    log(`${files.length} files linked, ${entries.length-1} files in overrides${removed?`, ${removed} junk files removed`:""}`,"g");
+    skipped.forEach(s=>log("Left out (not on Modrinth, none supplied): "+s.split("/").pop(),"w"));
+  }catch(e){log("Conversion failed: "+e.message,"e")}
+  $("go").disabled=false;
+}
+
+/* ---------- wiring ---------- */
+$("pick").onchange=e=>e.target.files[0]&&load(e.target.files[0]);
+const dz=$("drop");
+["dragover","dragenter"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.add("over")}));
+["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("over")}));
+dz.addEventListener("drop",e=>e.dataTransfer.files[0]&&load(e.dataTransfer.files[0]));
+$("go").onclick=convert;
+$("extra").onchange=async e=>{
+  for(const f of e.target.files){const u=new Uint8Array(await f.arrayBuffer()),h=await digest("SHA-1",u);
+    if(pack.files.some(x=>x.hashes.sha1===h)){extras.set(h,u);log("Added "+f.name,"g")}else log(f.name+" doesn't match any missing file (SHA-1 differs)","w")}
+  e.target.value="";render();
+};
+</script>
+</body>
+</html>
