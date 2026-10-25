@@ -60,7 +60,7 @@ button:focus-visible,a:focus-visible{outline:3px solid #F8AC1E;outline-offset:2p
     <label class="opt"><input type="checkbox" id="oApi" checked><span>Look up files on Modrinth<small>Finds Modrinth downloads for CurseForge files by hash and sets client/server support. Needs internet; only hashes are sent.</small></span></label>
     <label class="opt"><input type="checkbox" id="oClean" checked><span>Remove junk from overrides<small>Drops crash logs, download logs and world-specific JEI history.</small></span></label>
 
-    <div id="userdata" hidden><h3>Worlds, screenshots and settings</h3><div id="udList"></div></div>
+    <div id="userdata"><h3>Worlds, screenshots and settings</h3><div id="udList"></div><p class="note" id="setNote" style="margin:6px 0 0"></p><div class="actions" style="margin-top:8px"><label class="btn sec" style="cursor:pointer">Add settings files<input type="file" id="setFiles" multiple hidden></label></div></div>
 
     <div id="packs" hidden><h3>Resource pack load order</h3><p class="note" style="margin-top:0">Read from options.txt and kept exactly as is. Packs lower in the list override the ones above.</p><div class="files" id="packList"></div></div>
 
@@ -152,17 +152,22 @@ async function load(file){
   worlds=new Map();shots=0;
   for(const k of zip.keys()){const w=k.match(/^overrides\/saves\/([^/]+)\//);
     if(w)worlds.set(w[1],(worlds.get(w[1])||0)+1);else if(k.startsWith("overrides/screenshots/"))shots++}
-  const ud=$("udList");ud.textContent="";
-  const addRow=(key,title,sub)=>{const l=document.createElement("label");l.className="opt";
-    l.innerHTML='<input type="checkbox" checked><span></span>';l.firstChild.dataset.key=key;
-    l.lastChild.textContent=title;const sm=document.createElement("small");sm.textContent=sub;l.lastChild.append(sm);ud.append(l)};
+  $("udList").textContent="";
   for(const [n,c] of worlds)addRow("saves/"+n,"World: "+n,c+" files");
   if(shots)addRow("screenshots",`Screenshots (${shots})`,"Images from the screenshots folder");
-  const SETF=["options.txt","optionsof.txt","optionsshaders.txt","servers.dat"].filter(n=>zip.has("overrides/"+n));
-  if(SETF.length)addRow("settings","Game settings",SETF.join(", "));
-  $("userdata").hidden=!(worlds.size||shots||SETF.length);
+  refreshSettings();
   await showPacks();
   render();$("result").hidden=false;$("result").scrollIntoView({behavior:"smooth"});
+}
+const SETN=["options.txt","optionsof.txt","optionsshaders.txt","servers.dat"];
+function addRow(key,title,sub){const l=document.createElement("label");l.className="opt";
+  l.innerHTML='<input type="checkbox" checked><span></span>';l.firstChild.dataset.key=key;
+  l.lastChild.textContent=title;const sm=document.createElement("small");sm.textContent=sub;l.lastChild.append(sm);$("udList").append(l)}
+function refreshSettings(){
+  const old=$("udList").querySelector('[data-key="settings"]');if(old)old.closest("label").remove();
+  const have=SETN.filter(n=>zip.has("overrides/"+n));
+  if(have.length)addRow("settings","Game settings",have.join(", "));
+  $("setNote").textContent=have.includes("options.txt")?"":"No options.txt in this skpack, so resource pack order and game settings can't be carried over. Add the file from your instance folder (the one that contains options.txt) to include it.";
 }
 async function showPacks(){
   const box=$("packs"),list=$("packList");list.textContent="";box.hidden=true;
@@ -270,6 +275,12 @@ const dz=$("drop");
 ["dragleave","drop"].forEach(t=>dz.addEventListener(t,e=>{e.preventDefault();dz.classList.remove("over")}));
 dz.addEventListener("drop",e=>e.dataTransfer.files[0]&&load(e.dataTransfer.files[0]));
 $("go").onclick=convert;
+$("setFiles").onchange=async e=>{
+  for(const f of e.target.files){
+    if(!SETN.includes(f.name)){log(f.name+" isn't a settings file I know (options.txt, optionsof.txt, optionsshaders.txt, servers.dat)","w");continue}
+    const u=new Uint8Array(await f.arrayBuffer());zip.set("overrides/"+f.name,{get:()=>Promise.resolve(u)});log("Added "+f.name,"g")}
+  e.target.value="";refreshSettings();await showPacks();render();
+};
 $("extra").onchange=async e=>{
   for(const f of e.target.files){const u=new Uint8Array(await f.arrayBuffer()),h=await digest("SHA-1",u);
     if(pack.files.some(x=>x.hashes.sha1===h)){extras.set(h,u);log("Added "+f.name,"g")}else log(f.name+" doesn't match any missing file (SHA-1 differs)","w")}
